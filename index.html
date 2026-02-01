@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Advanced Whiteboard - Shreyash</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            background-color: #111;
+            color: #eee;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            height: 100vh;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+        header {
+            background: #222;
+            padding: 12px 20px;
+            border-bottom: 1px solid #444;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        h1 {
+            font-size: 1.4rem;
+            margin: 0;
+        }
+        #mode-toggle {
+            display: flex;
+            background: #333;
+            border-radius: 20px;
+            overflow: hidden;
+        }
+        .mode-btn {
+            padding: 8px 16px;
+            background: transparent;
+            border: none;
+            color: #aaa;
+            cursor: pointer;
+            font-weight: bold;
+            transition: all 0.3s;
+        }
+        .mode-btn.active {
+            background: #ff6600;
+            color: white;
+        }
+        #canvas-container {
+            flex: 1;
+            position: relative;
+            background: #000;
+            overflow: hidden;
+        }
+        #canvas {
+            background: white;
+            width: 100%;
+            height: 100%;
+            touch-action: none;
+            display: block;
+        }
+        #toolbar {
+            background: #222;
+            padding: 12px 15px;
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 10px;
+            border-top: 1px solid #444;
+            order: 3; /* Moves toolbar to bottom */
+        }
+        .tool-group {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+        button, select, input[type="color"], input[type="number"], input[type="file"] {
+            padding: 10px 14px;
+            background: #333;
+            color: white;
+            border: 1px solid #555;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 1rem;
+            min-width: 44px;
+            min-height: 44px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        button:hover {
+            background: #444;
+        }
+        button.active {
+            background: #ff6600;
+            border-color: #ff6600;
+        }
+        #credits {
+            position: absolute;
+            bottom: 80px; /* Above toolbar */
+            right: 15px;
+            font-size: 0.8rem;
+            color: #777;
+            pointer-events: none;
+            z-index: 10;
+        }
+        @media (max-width: 768px) {
+            #toolbar {
+                padding: 10px;
+                gap: 8px;
+            }
+            button, input {
+                padding: 12px 16px;
+                font-size: 1.1rem;
+            }
+            #credits {
+                bottom: 90px;
+            }
+        }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.338/pdf.min.js"></script>
+</head>
+<body>
+    <header>
+        <h1>Advanced Whiteboard</h1>
+        <div id="mode-toggle">
+            <button class="mode-btn active" data-mode="pc">PC Mode</button>
+            <button class="mode-btn" data-mode="mobile">Mobile Mode</button>
+        </div>
+    </header>
+
+    <div id="canvas-container">
+        <canvas id="canvas"></canvas>
+        <div id="credits">Credits: Shreyash Singh Rawat</div>
+    </div>
+
+    <div id="toolbar">
+        <div class="tool-group">
+            <button id="btn-pencil" class="active">✏️ Pencil</button>
+            <button id="btn-eraser">🧽 Eraser</button>
+            <button id="btn-fill">🪣 Fill</button>
+            <button id="btn-text">Aa Text</button>
+        </div>
+
+        <div class="tool-group">
+            <button id="btn-line">Line</button>
+            <button id="btn-rect">Rectangle</button>
+            <button id="btn-circle">Circle</button>
+        </div>
+
+        <div class="tool-group">
+            <input type="color" id="color" value="#000000" title="Drawing Color">
+            <input type="color" id="fillColor" value="#ff6600" title="Fill Color (for shapes & bucket)">
+            <input type="number" id="size" value="4" min="1" max="100" title="Brush / Text Size">
+        </div>
+
+        <div class="tool-group">
+            <input type="file" id="upload-img" accept="image/*" style="display:none;">
+            <button onclick="document.getElementById('upload-img').click()">🖼️ Image</button>
+
+            <input type="file" id="upload-pdf" accept=".pdf" style="display:none;">
+            <button onclick="document.getElementById('upload-pdf').click()">📄 PDF</button>
+        </div>
+
+        <div class="tool-group">
+            <button id="btn-undo">↺ Undo</button>
+            <button id="btn-clear">🗑️ Clear</button>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const container = document.getElementById('canvas-container');
+
+        let isDrawing = false;
+        let currentTool = 'pencil';
+        let lastX = 0, lastY = 0;
+        let startX, startY;
+        let history = [];
+        let mode = 'pc';
+
+        // Mode handling
+        document.querySelectorAll('.mode-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                mode = btn.dataset.mode;
+                document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                updateUIForMode();
+            });
+        });
+
+        function updateUIForMode() {
+            const isMobile = mode === 'mobile';
+            document.querySelectorAll('button, input').forEach(el => {
+                el.style.padding = isMobile ? '14px 18px' : '10px 14px';
+                el.style.fontSize = isMobile ? '1.15rem' : '1rem';
+            });
+            if (isMobile) {
+                document.getElementById('size').value = Math.max(6, parseInt(document.getElementById('size').value));
+            }
+        }
+
+        function resizeCanvas() {
+            canvas.width = container.clientWidth;
+            canvas.height = container.clientHeight;
+            redraw();
+        }
+
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        function saveState() {
+            history.push(ctx.getImageData(0, 0, canvas.width, canvas.height));
+            if (history.length > 20) history.shift();
+        }
+
+        function redraw() {
+            if (history.length) ctx.putImageData(history[history.length - 1], 0, 0);
+        }
+
+        function clearCanvas() {
+            ctx.fillStyle = 'white';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            saveState();
+        }
+        clearCanvas();
+
+        // Tool selection
+        document.querySelectorAll('#toolbar button[id^="btn-"]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                currentTool = btn.id.replace('btn-', '');
+                document.querySelectorAll('#toolbar button[id^="btn-"]').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+            });
+        });
+
+        function getPosition(e) {
+            const rect = canvas.getBoundingClientRect();
+            const clientX = e.clientX || (e.touches && e.touches[0]?.clientX);
+            const clientY = e.clientY || (e.touches && e.touches[0]?.clientY);
+            return {
+                x: clientX - rect.left,
+                y: clientY - rect.top
+            };
+        }
+
+        function start(e) {
+            isDrawing = true;
+            const pos = getPosition(e);
+            lastX = pos.x;
+            lastY = pos.y;
+            startX = pos.x;
+            startY = pos.y;
+
+            saveState();
+
+            if (currentTool === 'text') {
+                const text = prompt('Enter text:');
+                if (text) {
+                    ctx.fillStyle = document.getElementById('color').value;
+                    const size = parseInt(document.getElementById('size').value) * (mode === 'mobile' ? 6 : 5);
+                    ctx.font = `${size}px Arial`;
+                    ctx.fillText(text, pos.x, pos.y);
+                    saveState();
+                }
+                isDrawing = false;
+            } else if (currentTool === 'fill') {
+                floodFill(Math.floor(pos.x), Math.floor(pos.y), hexToRgb(document.getElementById('fillColor').value));
+                saveState();
+                isDrawing = false;
+            }
+
+            e.preventDefault();
+        }
+
+        function move(e) {
+            if (!isDrawing) return;
+            const pos = getPosition(e);
+            const color = currentTool === 'eraser' ? '#FFFFFF' : document.getElementById('color').value;
+            let size = parseInt(document.getElementById('size').value);
+            if (mode === 'mobile') size *= 1.4;
+
+            ctx.lineWidth = size;
+            ctx.lineCap = 'round';
+            ctx.strokeStyle = color;
+            ctx.fillStyle = document.getElementById('fillColor').value;
+
+            if (currentTool === 'pencil' || currentTool === 'eraser') {
+                ctx.beginPath();
+                ctx.moveTo(lastX, lastY);
+                ctx.lineTo(pos.x, pos.y);
+                ctx.stroke();
+            } else {
+                redraw();
+                if (currentTool === 'line') {
+                    ctx.beginPath();
+                    ctx.moveTo(startX, startY);
+                    ctx.lineTo(pos.x, pos.y);
+                    ctx.stroke();
+                } else if (currentTool === 'rect') {
+                    const w = pos.x - startX;
+                    const h = pos.y - startY;
+                    ctx.strokeRect(startX, startY, w, h);
+                    ctx.fillRect(startX, startY, w, h);
+                } else if (currentTool === 'circle') {
+                    const radius = Math.hypot(pos.x - startX, pos.y - startY);
+                    ctx.beginPath();
+                    ctx.arc(startX, startY, radius, 0, Math.PI * 2);
+                    ctx.stroke();
+                    ctx.fill();
+                }
+            }
+
+            lastX = pos.x;
+            lastY = pos.y;
+            e.preventDefault();
+        }
+
+        function end(e) {
+            if (!isDrawing) return;
+            isDrawing = false;
+
+            if (['line','rect','circle'].includes(currentTool)) {
+                redraw();
+                const pos = getPosition(e);
+                const size = parseInt(document.getElementById('size').value) * (mode === 'mobile' ? 1.4 : 1);
+                ctx.lineWidth = size;
+                ctx.strokeStyle = document.getElementById('color').value;
+                ctx.fillStyle = document.getElementById('fillColor').value;
+
+                if (currentTool === 'line') {
+                    ctx.beginPath();
+                    ctx.moveTo(startX, startY);
+                    ctx.lineTo(pos.x, pos.y);
+                    ctx.stroke();
+                } else if (currentTool === 'rect') {
+                    ctx.strokeRect(startX, startY, pos.x - startX, pos.y - startY);
+                    ctx.fillRect(startX, startY, pos.x - startX, pos.y - startY);
+                } else if (currentTool === 'circle') {
+                    const radius = Math.hypot(pos.x - startX, pos.y - startY);
+                    ctx.beginPath();
+                    ctx.arc(startX, startY, radius, 0, Math.PI * 2);
+                    ctx.stroke();
+                    ctx.fill();
+                }
+                saveState();
+            }
+            e.preventDefault();
+        }
+
+        // Flood fill
+        function hexToRgb(hex) {
+            const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+            return result ? [
+                parseInt(result[1], 16),
+                parseInt(result[2], 16),
+                parseInt(result[3], 16)
+            ] : [0,0,0];
+        }
+
+        function floodFill(x, y, fillColor) {
+            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            const data = imageData.data;
+            const target = getPixel(data, x, y);
+            if (colorsEqual(target, fillColor)) return;
+
+            const stack = [[x, y]];
+            while (stack.length) {
+                const [cx, cy] = stack.pop();
+                if (cx < 0 || cx >= canvas.width || cy < 0 || cy >= canvas.height) continue;
+                if (!colorsEqual(getPixel(data, cx, cy), target)) continue;
+
+                setPixel(data, cx, cy, fillColor);
+
+                stack.push([cx + 1, cy]);
+                stack.push([cx - 1, cy]);
+                stack.push([cx, cy + 1]);
+                stack.push([cx, cy - 1]);
+            }
+            ctx.putImageData(imageData, 0, 0);
+        }
+
+        function getPixel(data, x, y) {
+            const i = (y * canvas.width + x) * 4;
+            return [data[i], data[i+1], data[i+2]];
+        }
+
+        function setPixel(data, x, y, color) {
+            const i = (y * canvas.width + x) * 4;
+            data[i] = color[0];
+            data[i+1] = color[1];
+            data[i+2] = color[2];
+            data[i+3] = 255;
+        }
+
+        function colorsEqual(a, b) {
+            return a[0] === b[0] && a[1] === b[1] && a[2] === b[2];
+        }
+
+        // Events
+        canvas.addEventListener('mousedown', start);
+        canvas.addEventListener('mousemove', move);
+        canvas.addEventListener('mouseup', end);
+        canvas.addEventListener('mouseout', end);
+
+        canvas.addEventListener('touchstart', start);
+        canvas.addEventListener('touchmove', move);
+        canvas.addEventListener('touchend', end);
+        canvas.addEventListener('touchcancel', end);
+
+        // Uploads
+        document.getElementById('upload-img').addEventListener('change', e => {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = ev => {
+                const img = new Image();
+                img.onload = () => {
+                    saveState();
+                    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                    saveState();
+                };
+                img.src = ev.target.result;
+            };
+            reader.readAsDataURL(file);
+        });
+
+        document.getElementById('upload-pdf').addEventListener('change', e => {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = ev => {
+                pdfjsLib.getDocument(new Uint8Array(ev.target.result)).promise.then(pdf => {
+                    pdf.getPage(1).then(page => {
+                        const scale = Math.min(
+                            canvas.width / page.getViewport({scale:1}).width,
+                            canvas.height / page.getViewport({scale:1}).height
+                        ) * 0.95;
+                        const viewport = page.getViewport({scale});
+                        const temp = document.createElement('canvas');
+                        temp.width = viewport.width;
+                        temp.height = viewport.height;
+                        page.render({
+                            canvasContext: temp.getContext('2d'),
+                            viewport
+                        }).promise.then(() => {
+                            saveState();
+                            ctx.drawImage(temp,
+                                (canvas.width - temp.width)/2,
+                                (canvas.height - temp.height)/2
+                            );
+                            saveState();
+                        });
+                    });
+                });
+            };
+            reader.readAsArrayBuffer(file);
+        });
+
+        // Buttons
+        document.getElementById('btn-undo').onclick = () => {
+            if (history.length > 1) {
+                history.pop();
+                redraw();
+            }
+        };
+
+        document.getElementById('btn-clear').onclick = clearCanvas;
+
+        updateUIForMode();
+    </script>
+</body>
+</html>
